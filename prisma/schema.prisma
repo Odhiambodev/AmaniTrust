@@ -1,0 +1,191 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum KycStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  FAILED
+  MANUAL_REVIEW
+}
+
+enum GroupType {
+  CHAMA
+  HARAMBEE
+}
+
+enum GroupRole {
+  ADMIN
+  TREASURER
+  MEMBER
+}
+
+enum TransactionType {
+  CONTRIBUTION
+  LOAN
+  REPAYMENT
+  DISBURSEMENT
+  REFUND
+}
+
+enum TransactionStatus {
+  INITIATED
+  PENDING
+  SUCCESS
+  FAILED
+  REVERSED
+}
+
+enum TrustEventType {
+  IDENTITY_VERIFIED
+  CONTRIBUTION_SUCCESS
+  LOAN_REPAID
+  MEETING_VERIFIED
+  PEER_REVIEW
+  FAILED_OBLIGATION
+  FRAUD_REPORT
+  MANUAL_ADJUSTMENT
+}
+
+enum ConsentType {
+  IDENTITY_VERIFICATION
+  PAYMENT_PROCESSING
+  TRUST_SCORING
+  PUBLIC_VERIFICATION
+  MARKETING
+}
+
+model User {
+  id                  String       @id @default(uuid())
+  phoneHash           String       @unique
+  encryptedPhone      String
+  nationalIdHash      String?      @unique
+  encryptedNationalId String?
+  fullNameEncrypted   String?
+  status              UserStatus   @default(PENDING)
+  kycStatus           KycStatus    @default(NOT_STARTED)
+  kycProviderRef      String?
+  walletReference     String?
+  trustScore          Int          @default(0)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  memberships         GroupMember[]
+  initiatedTransactions Transaction[] @relation("TransactionInitiator")
+  receivedTransactions Transaction[] @relation("TransactionRecipient")
+  trustEvents         TrustEvent[]
+  consents            Consent[]
+  otpChallenges       OtpChallenge[]
+
+  @@index([status])
+  @@index([kycStatus])
+}
+
+model Group {
+  id          String       @id @default(uuid())
+  publicCode  String       @unique
+  name        String
+  type        GroupType
+  description String?
+  ownerId     String
+  owner       User         @relation(fields: [ownerId], references: [id])
+  isPublic    Boolean      @default(false)
+  trustScore  Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  members     GroupMember[]
+  transactions Transaction[]
+  trustEvents TrustEvent[]
+}
+
+model GroupMember {
+  id       String    @id @default(uuid())
+  userId   String
+  groupId  String
+  role     GroupRole @default(MEMBER)
+  joinedAt DateTime  @default(now())
+  isActive Boolean   @default(true)
+
+  user  User  @relation(fields: [userId], references: [id])
+  group Group @relation(fields: [groupId], references: [id])
+
+  @@unique([userId, groupId])
+}
+
+model Transaction {
+  id                    String            @id @default(uuid())
+  externalReferenceHash String?           @unique
+  mpesaReceiptHash      String?
+  initiatorId           String
+  recipientId           String?
+  groupId               String?
+  type                  TransactionType
+  amountMinor           BigInt
+  currency              String            @default("KES")
+  status                TransactionStatus @default(INITIATED)
+  failureCode           String?
+  failureReason         String?
+  occurredAt            DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  initiator User  @relation("TransactionInitiator", fields: [initiatorId], references: [id])
+  recipient User? @relation("TransactionRecipient", fields: [recipientId], references: [id])
+  group     Group? @relation(fields: [groupId], references: [id])
+}
+
+model TrustEvent {
+  id             String         @id @default(uuid())
+  subjectUserId  String
+  groupId        String?
+  type           TrustEventType
+  scoreDelta     Int
+  eventHash      String         @unique
+  blockchainTxId String?
+  metadataHash   String?
+  createdAt      DateTime       @default(now())
+
+  subjectUser User  @relation(fields: [subjectUserId], references: [id])
+  group       Group? @relation(fields: [groupId], references: [id])
+}
+
+model Consent {
+  id          String      @id @default(uuid())
+  userId      String
+  type        ConsentType
+  version     String
+  granted     Boolean
+  purpose     String
+  grantedAt   DateTime?
+  withdrawnAt DateTime?
+  createdAt   DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model OtpChallenge {
+  id        String    @id @default(uuid())
+  userId    String?
+  phoneHash String
+  codeHash  String
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
